@@ -15,21 +15,50 @@
 package mongodbadapter
 
 import (
-	"os"
-	"testing"
-
 	"github.com/casbin/casbin"
 	"github.com/casbin/casbin/util"
+	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
+	"log"
+	"os"
+	"testing"
+	"time"
 )
 
-var testDbURL = os.Getenv("TEST_MONGODB_URL")
+var (
+	dbHost         = os.Getenv("DB_HOST")
+	dbName         = os.Getenv("DB_NAME")
+	collectionName = os.Getenv("COLLECTION_NAME")
+)
 
-func getDbURL() string {
-	if testDbURL == "" {
-		testDbURL = "127.0.0.1:27017"
+func init() {
+	if dbHost == "" {
+		dbHost = "localhost:27017"
 	}
-	return testDbURL
+	if dbName == "" {
+		dbName = "casbin"
+	}
+	if collectionName == "" {
+		collectionName = "casbin_rules"
+	}
+}
+
+// NewMongoDbConn, get a new db connection
+func getMongoDbConnection(dbHost string) *mgo.Session {
+	// dial info
+	dialInfo := &mgo.DialInfo{
+		Addrs:   []string{dbHost},
+		Timeout: 30 * time.Second,
+	}
+
+	// Create new connection
+	conn, err := mgo.DialWithInfo(dialInfo)
+	if err != nil {
+		log.Fatal(err)
+	}
+	conn.SetMode(mgo.Monotonic, true)
+
+	return conn
 }
 
 func testGetPolicy(t *testing.T, e *casbin.Enforcer, res [][]string) {
@@ -46,7 +75,8 @@ func initPolicy(t *testing.T) {
 	// so we need to load the policy from the file adapter (.CSV) first.
 	e := casbin.NewEnforcer("examples/rbac_model.conf", "examples/rbac_policy.csv")
 
-	a := NewAdapter(getDbURL())
+	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
+	//a := NewAdapter(getDbURL())
 	// This is a trick to save the current policy to the DB.
 	// We can't call e.SavePolicy() because the adapter in the enforcer is still the file adapter.
 	// The current policy means the policy in the Casbin enforcer (aka in memory).
@@ -76,7 +106,8 @@ func TestAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURL())
+	//a := NewAdapter(getDbURL())
+	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
 
@@ -138,7 +169,8 @@ func TestAdapter(t *testing.T) {
 	testGetPolicy(t, e, [][]string{})
 }
 func TestDeleteFilteredAdapter(t *testing.T) {
-	a := NewAdapter(getDbURL())
+	//a := NewAdapter(getDbURL())
+	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
 	e := casbin.NewEnforcer("examples/rbac_tenant_service.conf", a)
 
 	e.AddPolicy("domain1", "alice", "data3", "read", "accept", "service1")
@@ -169,7 +201,8 @@ func TestFilteredAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURL())
+	//a := NewAdapter(getDbURL())
+	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 
 	// Load filtered policies from the database.
@@ -207,24 +240,4 @@ func TestFilteredAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	testGetPolicy(t, e, [][]string{})
-}
-
-func TestNewAdapterWithInvalidURL(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected recovery from panic")
-		}
-	}()
-
-	_ = NewAdapter("localhost:40001?foo=1&bar=2")
-}
-
-func TestNewAdapterWithUnknownURL(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected recovery from panic")
-		}
-	}()
-
-	_ = NewAdapter("fakeserver:27017")
 }

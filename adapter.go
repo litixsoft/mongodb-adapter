@@ -36,7 +36,6 @@ type CasbinRule struct {
 
 // adapter represents the MongoDB adapter for policy storage.
 type adapter struct {
-	url        string
 	session    *mgo.Session
 	collection *mgo.Collection
 	filtered   bool
@@ -49,8 +48,8 @@ func finalizer(a *adapter) {
 
 // NewAdapter is the constructor for Adapter. If database name is not provided
 // in the Mongo URL, 'casbin' will be used as database name.
-func NewAdapter(url string) persist.Adapter {
-	a := &adapter{url: url}
+func NewAdapter(conn *mgo.Session, dbName, collectionName string) persist.Adapter {
+	a := &adapter{session: conn.Copy(), collection: conn.DB(dbName).C(collectionName)}
 
 	// Open the DB, create it if not existed.
 	a.open()
@@ -63,38 +62,32 @@ func NewAdapter(url string) persist.Adapter {
 
 // NewFilteredAdapter is the constructor for FilteredAdapter. Behavior is
 // otherwise indentical to the NewAdapter function.
-func NewFilteredAdapter(url string) persist.FilteredAdapter {
+func NewFilteredAdapter(url string, conn *mgo.Session, dbName, collectionName string) persist.FilteredAdapter {
 	// The adapter already supports the new interface, it just needs to be retyped.
-	return NewAdapter(url).(*adapter)
+	return NewAdapter(conn, dbName, collectionName).(*adapter)
 }
 
 func (a *adapter) open() {
-	dI, err := mgo.ParseURL(a.url)
-	if err != nil {
-		panic(err)
-	}
-
-	// FailFast will cause connection and query attempts to fail faster when
-	// the server is unavailable, instead of retrying until the configured
-	// timeout period. Note that an unavailable server may silently drop
-	// packets instead of rejecting them, in which case it's impossible to
-	// distinguish it from a slow server, so the timeout stays relevant.
-	dI.FailFast = true
-
-	if dI.Database == "" {
-		dI.Database = "casbin"
-	}
-
-	session, err := mgo.DialWithInfo(dI)
-	if err != nil {
-		panic(err)
-	}
-
-	db := session.DB(dI.Database)
-	collection := db.C("casbin_rule")
-
-	a.session = session
-	a.collection = collection
+	//dI, err := mgo.ParseURL(a.url)
+	//	//if err != nil {
+	//	//	panic(err)
+	//	//}
+	//	//
+	//	//// FailFast will cause connection and query attempts to fail faster when
+	//	//// the server is unavailable, instead of retrying until the configured
+	//	//// timeout period. Note that an unavailable server may silently drop
+	//	//// packets instead of rejecting them, in which case it's impossible to
+	//	//// distinguish it from a slow server, so the timeout stays relevant.
+	//	//dI.FailFast = true
+	//	//
+	//	//if dI.Database == "" {
+	//	//	dI.Database = "casbin"
+	//	//}
+	//	//
+	//	//session, err := mgo.DialWithInfo(dI)
+	//	//if err != nil {
+	//	//	panic(err)
+	//	//}
 
 	indexes := []string{"ptype", "v0", "v1", "v2", "v3", "v4", "v5"}
 	for _, k := range indexes {

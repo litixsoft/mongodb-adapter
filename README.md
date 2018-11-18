@@ -1,11 +1,11 @@
-MongoDB Adapter [![Build Status](https://travis-ci.org/casbin/mongodb-adapter.svg?branch=master)](https://travis-ci.org/casbin/mongodb-adapter) [![Coverage Status](https://coveralls.io/repos/github/casbin/mongodb-adapter/badge.svg?branch=master)](https://coveralls.io/github/casbin/mongodb-adapter?branch=master) [![Godoc](https://godoc.org/github.com/casbin/mongodb-adapter?status.svg)](https://godoc.org/github.com/casbin/mongodb-adapter)
+MongoDB Adapter [![Build Status](https://travis-ci.org/litixsoft/mongodb-adapter.svg?branch=master)](https://travis-ci.org/litixsoft/mongodb-adapter) [![Coverage Status](https://coveralls.io/repos/github/litixsoft/mongodb-adapter/badge.svg?branch=master)](https://coveralls.io/github/litixsoft/mongodb-adapter?branch=master) [![Godoc](https://godoc.org/github.com/litixsoft/mongodb-adapter?status.svg)](https://godoc.org/github.com/litixsoft/mongodb-adapter)
 ====
 
 MongoDB Adapter is the [Mongo DB](https://www.mongodb.com) adapter for [Casbin](https://github.com/casbin/casbin). With this library, Casbin can load policy from MongoDB or save policy to it.
 
 ## Installation
 
-    go get github.com/casbin/mongodb-adapter
+    go get github.com/litixsoft/mongodb-adapter
 
 ## Simple Example
 
@@ -14,19 +14,29 @@ package main
 
 import (
 	"github.com/casbin/casbin"
-	"github.com/casbin/mongodb-adapter"
+	"github.com/globalsign/mgo"
+	"github.com/litixsoft/mongodb-adapter"
+	"log"
+	"time"
 )
 
 func main() {
-	// Initialize a MongoDB adapter and use it in a Casbin enforcer:
-	// The adapter will use the database named "casbin".
-	// If it doesn't exist, the adapter will create it automatically.
-	a := mongodbadapter.NewAdapter("127.0.0.1:27017") // Your MongoDB URL. 
 	
-	// Or you can use an existing DB "abc" like this:
-	// The adapter will use the table named "casbin_rule".
+	// Connect to mongodb 
+    dialInfo := &mgo.DialInfo{
+        Addrs:   []string{"localhost:27017"},
+    	Timeout: 30 * time.Second,
+    }
+   	session, err := mgo.DialWithInfo(dialInfo)
+   	if err != nil {
+   		log.Fatal(err)
+   	}
+   	session.SetMode(mgo.Monotonic, true)
+	
+	// Initialize a MongoDB adapter and use it in a Casbin enforcer:
+	// The adapter will use the given database and collection name.
 	// If it doesn't exist, the adapter will create it automatically.
-	// a := mongodbadapter.NewAdapter("127.0.0.1:27017/abc")
+	a := mongodbadapter.NewAdapter(session, "my-db", "casbin-rules")
 	
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	
@@ -48,7 +58,7 @@ func main() {
 ## Filtered Policies
 
 ```go
-import "gopkg.in/mgo.v2/bson"
+import "github.com/globalsign/mgo/bson"
 
 // This adapter also implements the FilteredAdapter interface. This allows for
 // efficent, scalable enforcement of very large policies:
