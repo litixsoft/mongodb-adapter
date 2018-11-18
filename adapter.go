@@ -20,7 +20,7 @@ import (
 
 	"github.com/casbin/casbin/model"
 	"github.com/casbin/casbin/persist"
-	"gopkg.in/mgo.v2"
+	"github.com/globalsign/mgo"
 )
 
 // CasbinRule represents a rule in Casbin.

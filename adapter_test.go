@@ -20,7 +20,7 @@ import (
 
 	"github.com/casbin/casbin"
 	"github.com/casbin/casbin/util"
-	"gopkg.in/mgo.v2/bson"
+	"github.com/globalsign/mgo/bson"
 )
 
 var testDbURL = os.Getenv("TEST_MONGODB_URL")
