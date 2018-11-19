@@ -170,7 +170,7 @@ func TestAdapter(t *testing.T) {
 }
 func TestDeleteFilteredAdapter(t *testing.T) {
 	//a := NewAdapter(getDbURL())
-	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
+	a := NewFilteredAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
 	e := casbin.NewEnforcer("examples/rbac_tenant_service.conf", a)
 
 	e.AddPolicy("domain1", "alice", "data3", "read", "accept", "service1")
@@ -202,7 +202,7 @@ func TestFilteredAdapter(t *testing.T) {
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
 	//a := NewAdapter(getDbURL())
-	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
+	a := NewFilteredAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 
 	// Load filtered policies from the database.

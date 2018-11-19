@@ -62,33 +62,12 @@ func NewAdapter(conn *mgo.Session, dbName, collectionName string) persist.Adapte
 
 // NewFilteredAdapter is the constructor for FilteredAdapter. Behavior is
 // otherwise indentical to the NewAdapter function.
-func NewFilteredAdapter(url string, conn *mgo.Session, dbName, collectionName string) persist.FilteredAdapter {
+func NewFilteredAdapter(conn *mgo.Session, dbName, collectionName string) persist.FilteredAdapter {
 	// The adapter already supports the new interface, it just needs to be retyped.
 	return NewAdapter(conn, dbName, collectionName).(*adapter)
 }
 
 func (a *adapter) open() {
-	//dI, err := mgo.ParseURL(a.url)
-	//	//if err != nil {
-	//	//	panic(err)
-	//	//}
-	//	//
-	//	//// FailFast will cause connection and query attempts to fail faster when
-	//	//// the server is unavailable, instead of retrying until the configured
-	//	//// timeout period. Note that an unavailable server may silently drop
-	//	//// packets instead of rejecting them, in which case it's impossible to
-	//	//// distinguish it from a slow server, so the timeout stays relevant.
-	//	//dI.FailFast = true
-	//	//
-	//	//if dI.Database == "" {
-	//	//	dI.Database = "casbin"
-	//	//}
-	//	//
-	//	//session, err := mgo.DialWithInfo(dI)
-	//	//if err != nil {
-	//	//	panic(err)
-	//	//}
-
 	indexes := []string{"ptype", "v0", "v1", "v2", "v3", "v4", "v5"}
 	for _, k := range indexes {
 		if err := a.collection.EnsureIndexKey(k); err != nil {
