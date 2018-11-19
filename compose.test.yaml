@@ -1,0 +1,19 @@
+version: '3'
+services:
+  adapter:
+    image: golang:1.11
+    volumes:
+      - .:/root/app
+    working_dir: /root/app
+    environment:
+      - DB_HOST=adapter-mongodb
+    links:
+      - adapter-mongodb
+    command: >
+      sh -c "go version
+      && pwd
+      && ls -la
+      && go test -cover ./..."
+  adapter-mongodb:
+    image: mongo:4.0
+    command: mongod --smallfiles --logpath=/dev/null # --quiet

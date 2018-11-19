@@ -1,15 +1,30 @@
-language: go
-
-sudo: false
-
-go:
-  - tip
-
-before_install:
-  - go get github.com/mattn/goveralls
-
-script:
-  - $HOME/gopath/bin/goveralls -service=travis-ci
+#language: go
+#
+#sudo: false
+#
+#go:
+#  - tip
+#
+#before_install:
+#  - go get github.com/mattn/goveralls
+#
+#script:
+#  - $HOME/gopath/bin/goveralls -service=travis-ci
+#
+#services:
+#  - mongodb
+sudo: required
 
 services:
-  - mongodb
+- docker
+
+-language: go
+
+before_install:
+- docker pull golang:1.11
+- docker pull mongo:4.0
+
+script:
+- docker-compose -f ./compose.test.yaml build
+- docker-compose -f ./compose.test.yaml run adapter
+- docker-compose -f ./compose.test.yaml down
