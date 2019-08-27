@@ -1,4 +1,4 @@
-// Copyright 2017 The casbin Authors. All Rights Reserved.
+// Copyright 2018 The casbin Authors. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ import (
 	"errors"
 	"runtime"
 
-	"github.com/casbin/casbin/model"
-	"github.com/casbin/casbin/persist"
+	"github.com/casbin/casbin/v2/model"
+	"github.com/casbin/casbin/v2/persist"
 	"github.com/globalsign/mgo"
 )
 
@@ -36,6 +36,7 @@ type CasbinRule struct {
 
 // adapter represents the MongoDB adapter for policy storage.
 type adapter struct {
+	dialInfo   *mgo.DialInfo
 	session    *mgo.Session
 	collection *mgo.Collection
 	filtered   bool
@@ -48,8 +49,20 @@ func finalizer(a *adapter) {
 
 // NewAdapter is the constructor for Adapter. If database name is not provided
 // in the Mongo URL, 'casbin' will be used as database name.
-func NewAdapter(conn *mgo.Session, dbName, collectionName string) persist.Adapter {
-	a := &adapter{session: conn.Copy(), collection: conn.DB(dbName).C(collectionName)}
+func NewAdapter(url string) persist.Adapter {
+	dI, err := mgo.ParseURL(url)
+	if err != nil {
+		panic(err)
+	}
+
+	return NewAdapterWithDialInfo(dI)
+}
+
+// NewAdapterWithDialInfo is an alternative constructor for Adapter
+// that does the same as NewAdapter, but uses mgo.DialInfo instead of a Mongo URL
+func NewAdapterWithDialInfo(dI *mgo.DialInfo) persist.Adapter {
+	a := &adapter{dialInfo: dI}
+	a.filtered = false
 
 	// Open the DB, create it if not existed.
 	a.open()
@@ -60,14 +73,38 @@ func NewAdapter(conn *mgo.Session, dbName, collectionName string) persist.Adapte
 	return a
 }
 
-// NewFilteredAdapter is the constructor for FilteredAdapter. Behavior is
-// otherwise indentical to the NewAdapter function.
-func NewFilteredAdapter(conn *mgo.Session, dbName, collectionName string) persist.FilteredAdapter {
-	// The adapter already supports the new interface, it just needs to be retyped.
-	return NewAdapter(conn, dbName, collectionName).(*adapter)
+// NewFilteredAdapter is the constructor for FilteredAdapter.
+// Casbin will not automatically call LoadPolicy() for a filtered adapter.
+func NewFilteredAdapter(url string) persist.FilteredAdapter {
+	a := NewAdapter(url).(*adapter)
+	a.filtered = true
+
+	return a
 }
 
 func (a *adapter) open() {
+	// FailFast will cause connection and query attempts to fail faster when
+	// the server is unavailable, instead of retrying until the configured
+	// timeout period. Note that an unavailable server may silently drop
+	// packets instead of rejecting them, in which case it's impossible to
+	// distinguish it from a slow server, so the timeout stays relevant.
+	a.dialInfo.FailFast = true
+
+	if a.dialInfo.Database == "" {
+		a.dialInfo.Database = "casbin"
+	}
+
+	session, err := mgo.DialWithInfo(a.dialInfo)
+	if err != nil {
+		panic(err)
+	}
+
+	db := session.DB(a.dialInfo.Database)
+	collection := db.C("casbin_rule")
+
+	a.session = session
+	a.collection = collection
+
 	indexes := []string{"ptype", "v0", "v1", "v2", "v3", "v4", "v5"}
 	for _, k := range indexes {
 		if err := a.collection.EnsureIndexKey(k); err != nil {
@@ -81,7 +118,10 @@ func (a *adapter) close() {
 }
 
 func (a *adapter) dropTable() error {
-	err := a.collection.DropCollection()
+	session := a.session.Copy()
+	defer session.Close()
+
+	err := a.collection.With(session).DropCollection()
 	if err != nil {
 		if err.Error() != "ns not found" {
 			return err
@@ -149,7 +189,11 @@ func (a *adapter) LoadFilteredPolicy(model model.Model, filter interface{}) erro
 		a.filtered = true
 	}
 	line := CasbinRule{}
-	iter := a.collection.Find(filter).Iter()
+
+	session := a.session.Copy()
+	defer session.Close()
+
+	iter := a.collection.With(session).Find(filter).Iter()
 	for iter.Next(&line) {
 		loadPolicyLine(line, model)
 	}
@@ -214,19 +258,30 @@ func (a *adapter) SavePolicy(model model.Model) error {
 		}
 	}
 
-	return a.collection.Insert(lines...)
+	session := a.session.Copy()
+	defer session.Close()
+
+	return a.collection.With(session).Insert(lines...)
 }
 
 // AddPolicy adds a policy rule to the storage.
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	return a.collection.Insert(line)
+
+	session := a.session.Copy()
+	defer session.Close()
+
+	return a.collection.With(session).Insert(line)
 }
 
 // RemovePolicy removes a policy rule from the storage.
 func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	if err := a.collection.Remove(line); err != nil {
+
+	session := a.session.Copy()
+	defer session.Close()
+
+	if err := a.collection.With(session).Remove(line); err != nil {
 		switch err {
 		case mgo.ErrNotFound:
 			return nil
@@ -273,6 +328,9 @@ func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int,
 		}
 	}
 
-	_, err := a.collection.RemoveAll(selector)
+	session := a.session.Copy()
+	defer session.Close()
+
+	_, err := a.collection.With(session).RemoveAll(selector)
 	return err
 }

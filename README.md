@@ -5,7 +5,7 @@ MongoDB Adapter is the [Mongo DB](https://www.mongodb.com) adapter for [Casbin](
 
 ## Installation
 
-    go get github.com/litixsoft/mongodb-adapter
+    go get -u github.com/casbin/mongodb-adapter/v2
 
 ## Simple Example
 
@@ -13,11 +13,8 @@ MongoDB Adapter is the [Mongo DB](https://www.mongodb.com) adapter for [Casbin](
 package main
 
 import (
-	"github.com/casbin/casbin"
-	"github.com/globalsign/mgo"
-	"github.com/litixsoft/mongodb-adapter"
-	"log"
-	"time"
+	"github.com/casbin/casbin/v2"
+	"github.com/casbin/mongodb-adapter/v2"
 )
 
 func main() {
@@ -32,17 +29,18 @@ func main() {
     }
     session.SetMode(mgo.Monotonic, true)
 	
-    // Initialize a MongoDB adapter and use it in a Casbin enforcer:
-    // The adapter will use the given database and collection name. 
-    // If it doesn't exist, the adapter will create it automatically. 
-    a := mongodbadapter.NewAdapter(session, "my-db", "casbin-rules")
-    e := casbin.NewEnforcer("examples/rbac_model.conf", a)
-	
-    // Load the policy from DB. 
-    e.LoadPolicy()
-	
-    // Check the permission.
-    e.Enforce("alice", "data1", "read")
+	// Or you can use an existing DB "abc" like this:
+	// The adapter will use the table named "casbin_rule".
+	// If it doesn't exist, the adapter will create it automatically.
+	// a := mongodbadapter.NewAdapter("127.0.0.1:27017/abc")
+
+	e, err := casbin.NewEnforcer("examples/rbac_model.conf", a)
+	if err != nil {
+		panic(err)
+	}
+
+	// Load the policy from DB.
+	e.LoadPolicy()
 	
     // Modify the policy.
     // e.AddPolicy(...) 
@@ -52,6 +50,22 @@ func main() {
     e.SavePolicy()
 }
 ```
+
+## Filtered Policies
+
+```go
+import "github.com/globalsign/mgo/bson"
+
+// This adapter also implements the FilteredAdapter interface. This allows for
+// efficent, scalable enforcement of very large policies:
+filter := &bson.M{"v0": "alice"}
+e.LoadFilteredPolicy(filter)
+
+// The loaded policy is now a subset of the policy in storage, containing only
+// the policy lines that match the provided filter. This filter should be a
+// valid MongoDB selector using BSON. A filtered policy cannot be saved.
+```
+
 ## Getting Help
 
 - [Casbin](https://github.com/casbin/casbin)
