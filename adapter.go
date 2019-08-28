@@ -29,6 +29,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+const CasbinMongodbDatabasename = "casbin"
+const CasbinMongodbCollectionname = "casbin_rule"
+
 // CasbinRule represents a rule in Casbin.
 type CasbinRule struct {
 	PType string
@@ -57,12 +60,26 @@ func finalizer(a *adapter) {
 	}
 }
 
-func newAdapterWithParams(mC *mongo.Client, database string, autodisconnect bool) persist.Adapter {
+func newAdapterWithParams(mC *mongo.Client, database interface{}, autodisconnect bool) persist.Adapter {
 	a := &adapter{client: mC}
 	a.filtered = false
 	a.ownclient = autodisconnect
-	a.databasename = database
 	a.context, _ = context.WithTimeout(context.Background(), 10*time.Second)
+
+	// database interface{} as string or *mongo.Database or *mongo.Collection
+	switch database.(type) {
+	case string:
+		a.databasename = database.(string)
+		a.collection = nil
+	case *mongo.Database:
+		a.databasename = database.(*mongo.Database).Name()
+		a.collection = database.(*mongo.Database).Collection(CasbinMongodbCollectionname)
+	case *mongo.Collection:
+		a.databasename = database.(*mongo.Collection).Database().Name()
+		a.collection = database.(*mongo.Collection)
+	default:
+		panic(errors.New("string/*mongo.Database/*mongo.Collection instance required"))
+	}
 
 	// Open the DB, create it if not existed.
 	a.open()
@@ -74,7 +91,7 @@ func newAdapterWithParams(mC *mongo.Client, database string, autodisconnect bool
 }
 
 // NewAdapter is the constructor for Adapter. If database name is not provided
-// in the Mongo URL, 'casbin' will be used as database name.
+// in the Mongo URI, 'casbin' will be used as database name.
 func NewAdapter(uri string) persist.Adapter {
 	cs, err := connstring.Parse(uri)
 
@@ -92,9 +109,33 @@ func NewAdapter(uri string) persist.Adapter {
 }
 
 // NewAdapterWithClient is an alternative constructor for Adapter
-// that does the same as NewAdapter, but uses mgo.DialInfo instead of a Mongo URL
+// that does the same as NewAdapter, but uses *mongo.Client instead of a Mongo URI
 func NewAdapterWithClient(mC *mongo.Client, database string) persist.Adapter {
+	if mC == nil {
+		panic(errors.New("mongo client instance are required"))
+	}
+
 	return newAdapterWithParams(mC, database, false)
+}
+
+// NewAdapterWithDatabase is an alternative constructor for Adapter
+// that does the same as NewAdapter, but uses *mongo.Database instead of a Mongo URI
+func NewAdapterWithDatabase(mDatabase *mongo.Database) persist.Adapter {
+	if mDatabase == nil {
+		panic(errors.New("database instance are required"))
+	}
+
+	return newAdapterWithParams(mDatabase.Client(), mDatabase, false)
+}
+
+// NewAdapterWithDatabase is an alternative constructor for Adapter
+// that does the same as NewAdapter, but uses *mongo.Collection instead of a Mongo URI
+func NewAdapterWithCollection(mCollection *mongo.Collection) persist.Adapter {
+	if mCollection == nil {
+		panic(errors.New("collection instance are required"))
+	}
+
+	return newAdapterWithParams(mCollection.Database().Client(), mCollection, false)
 }
 
 // NewFilteredAdapter is the constructor for FilteredAdapter.
@@ -106,27 +147,38 @@ func NewFilteredAdapter(uri string) persist.FilteredAdapter {
 	return a
 }
 
-func (a *adapter) open() {
-	// Force a ping to database host
-	// if fails with ErrClientDisconnected then reconnect
+func (a *adapter) forceConnect() error {
 	err := a.client.Ping(a.context, readpref.Primary())
 
 	if err != nil {
 		if err == mongo.ErrClientDisconnected {
 			// try to reconnect
 			if err := a.client.Connect(a.context); err != nil {
-				panic(err)
+				return err
 			}
 		} else {
-			panic(err)
+			return err
 		}
 	}
 
-	if a.databasename == "" {
-		a.databasename = "casbin"
+	return nil
+}
+
+func (a *adapter) open() {
+	// Force a ping to database host
+	// if fails with ErrClientDisconnected then reconnect
+	if err := a.forceConnect(); err != nil {
+		panic(err)
 	}
 
-	a.collection = a.client.Database(a.databasename).Collection("casbin_rule")
+	if a.databasename == "" {
+		a.databasename = CasbinMongodbDatabasename
+	}
+
+	// Create or use a collection
+	if a.collection == nil {
+		a.collection = a.client.Database(a.databasename).Collection(CasbinMongodbCollectionname)
+	}
 
 	indexModels := []mongo.IndexModel{
 		{

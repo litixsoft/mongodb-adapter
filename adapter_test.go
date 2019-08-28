@@ -265,11 +265,54 @@ func TestNewAdapterWithClient(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Error("Expected recovery from panic")
-			fmt.Println(r)
 		}
 
 		_ = client.Disconnect(context.Background())
 	}()
 
 	_ = NewAdapterWithClient(client, "casbin_test")
+}
+
+func TestNewAdapterWithDatabase(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(getDbURI()))
+
+	if err != nil {
+		panic(err)
+	}
+
+	// connect
+	_ = client.Connect(context.Background())
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Error("Expected recovery from panic")
+			fmt.Println(r)
+		}
+
+		_ = client.Disconnect(context.Background())
+	}()
+
+	_ = NewAdapterWithDatabase(client.Database("casbin_test"))
+}
+
+func TestNewAdapterWithCollection(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(getDbURI()))
+
+	if err != nil {
+		panic(err)
+	}
+
+	// connect
+	_ = client.Connect(context.Background())
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Error("Expected recovery from panic")
+			fmt.Println(r)
+		}
+
+		_ = client.Disconnect(context.Background())
+	}()
+
+	_ = NewAdapterWithCollection(client.Database("casbin_test").Collection("casbin_rule"))
 }
