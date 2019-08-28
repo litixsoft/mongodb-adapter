@@ -111,8 +111,10 @@ func (a *adapter) open() {
 	// timeout period. Note that an unavailable server may silently drop
 	// packets instead of rejecting them, in which case it's impossible to
 	// distinguish it from a slow server, so the timeout stays relevant.
-	if err := a.client.Connect(a.context); err != nil {
-		panic(err)
+	if a.ownclient {
+		if err := a.client.Connect(a.context); err != nil {
+			panic(err)
+		}
 	}
 
 	if a.databasename == "" {
