@@ -15,49 +15,22 @@
 package mongodbadapter
 
 import (
-	"github.com/casbin/casbin"
-	"github.com/casbin/casbin/util"
-	"github.com/globalsign/mgo"
-	"github.com/globalsign/mgo/bson"
-	"log"
+	"go.mongodb.org/mongo-driver/bson"
 	"os"
 	"testing"
-	"time"
-)
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/util"
-	"github.com/globalsign/mgo/bson"
 )
 
-func init() {
-	if dbHost == "" {
-		dbHost = "localhost:27017"
-	}
-	if dbName == "" {
-		dbName = "casbin"
-	}
-	if collectionName == "" {
-		collectionName = "casbin_rules"
-	}
-}
+var testDbURI = os.Getenv("TEST_MONGODB_URI")
 
-// NewMongoDbConn, get a new db connection
-func getMongoDbConnection(dbHost string) *mgo.Session {
-	// dial info
-	dialInfo := &mgo.DialInfo{
-		Addrs:   []string{dbHost},
-		Timeout: 30 * time.Second,
+func getDbURI() string {
+	if testDbURI == "" {
+		testDbURI = "mongodb://127.0.0.1:27017/casbin_test"
 	}
 
-	// Create new connection
-	conn, err := mgo.DialWithInfo(dialInfo)
-	if err != nil {
-		log.Fatal(err)
-	}
-	conn.SetMode(mgo.Monotonic, true)
-
-	return conn
+	return testDbURI
 }
 
 func testGetPolicy(t *testing.T, e *casbin.Enforcer, res [][]string) {
@@ -78,8 +51,7 @@ func initPolicy(t *testing.T) {
 		panic(err)
 	}
 
-	a := NewAdapter(getMongoDbConnection(dbHost), dbName, collectionName)
-	//a := NewAdapter(getDbURL())
+	a := NewAdapter(getDbURI())
 	// This is a trick to save the current policy to the DB.
 	// We can't call e.SavePolicy() because the adapter in the enforcer is still the file adapter.
 	// The current policy means the policy in the Casbin enforcer (aka in memory).
@@ -109,7 +81,7 @@ func TestAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURL())
+	a := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	if err != nil {
 		panic(err)
@@ -151,6 +123,7 @@ func TestAdapter(t *testing.T) {
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
+
 	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
 
 	// Remove "data2_admin" related policy rules via a filter.
@@ -159,22 +132,26 @@ func TestAdapter(t *testing.T) {
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
+
 	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}})
 
 	e.RemoveFilteredPolicy(1, "data1")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
+
 	testGetPolicy(t, e, [][]string{{"bob", "data2", "write"}})
 
 	e.RemoveFilteredPolicy(2, "write")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
+
 	testGetPolicy(t, e, [][]string{})
 }
+
 func TestDeleteFilteredAdapter(t *testing.T) {
-	a := NewAdapter(getDbURL())
+	a := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_tenant_service.conf", a)
 	if err != nil {
 		panic(err)
@@ -208,7 +185,7 @@ func TestFilteredAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURL())
+	a := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	if err != nil {
 		panic(err)
@@ -249,4 +226,24 @@ func TestFilteredAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	testGetPolicy(t, e, [][]string{})
+}
+
+func TestNewAdapterWithInvalidURL(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected recovery from panic")
+		}
+	}()
+
+	_ = NewAdapter("localhost:40001?foo=1&bar=2")
+}
+
+func TestNewAdapterWithUnknownURL(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected recovery from panic")
+		}
+	}()
+
+	_ = NewAdapter("fakeserver:27017")
 }
