@@ -19,6 +19,7 @@ import (
 	"errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 	"runtime"
 	"time"
@@ -106,13 +107,17 @@ func NewFilteredAdapter(uri string) persist.FilteredAdapter {
 }
 
 func (a *adapter) open() {
-	// FailFast will cause connection and query attempts to fail faster when
-	// the server is unavailable, instead of retrying until the configured
-	// timeout period. Note that an unavailable server may silently drop
-	// packets instead of rejecting them, in which case it's impossible to
-	// distinguish it from a slow server, so the timeout stays relevant.
-	if a.ownclient {
-		if err := a.client.Connect(a.context); err != nil {
+	// Force a ping to database host
+	// if fails with ErrClientDisconnected then reconnect
+	err := a.client.Ping(a.context, readpref.Primary())
+
+	if err != nil {
+		if err == mongo.ErrClientDisconnected {
+			// try to reconnect
+			if err := a.client.Connect(a.context); err != nil {
+				panic(err)
+			}
+		} else {
 			panic(err)
 		}
 	}

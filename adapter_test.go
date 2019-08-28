@@ -15,7 +15,11 @@
 package mongodbadapter
 
 import (
+	"context"
+	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"os"
 	"testing"
 
@@ -246,4 +250,26 @@ func TestNewAdapterWithUnknownURL(t *testing.T) {
 	}()
 
 	_ = NewAdapter("fakeserver:27017")
+}
+
+func TestNewAdapterWithClient(t *testing.T) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(getDbURI()))
+
+	if err != nil {
+		panic(err)
+	}
+
+	// connect
+	_ = client.Connect(context.Background())
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Error("Expected recovery from panic")
+			fmt.Println(r)
+		}
+
+		_ = client.Disconnect(context.Background())
+	}()
+
+	_ = NewAdapterWithClient(client, "casbin_test")
 }
