@@ -26,11 +26,16 @@ import (
 	"github.com/casbin/casbin/v2/util"
 )
 
-var testDbURI = os.Getenv("TEST_MONGODB_URI")
+var dbHost = os.Getenv("DB_HOST")
+var testDbURI = ""
 
 func getDbURI() string {
 	if testDbURI == "" {
-		testDbURI = "mongodb://127.0.0.1:27017/casbin_test"
+		if dbHost != "" {
+			testDbURI = "mongodb://" + dbHost + "/casbin_test"
+		} else {
+			testDbURI = "mongodb://127.0.0.1:27017/casbin_test"
+		}
 	}
 
 	return testDbURI
