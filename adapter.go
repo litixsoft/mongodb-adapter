@@ -60,25 +60,46 @@ func finalizer(a *adapter) {
 	}
 }
 
-func newAdapterWithParams(mC *mongo.Client, database interface{}, autodisconnect bool) persist.Adapter {
-	a := &adapter{client: mC}
+// NewAdapter is the constructor for Adapter.
+// param can be a mongodb uri string, *mongo.Database or *mongo.Collection
+// If database name is not provided in the Mongo URI, 'casbin' will be used as database name.
+func NewAdapter(param interface{}) persist.Adapter {
+	a := &adapter{client: nil, collection: nil, databasename: "", ownclient: false}
 	a.filtered = false
-	a.ownclient = autodisconnect
 	a.context, _ = context.WithTimeout(context.Background(), 10*time.Second)
 
 	// database interface{} as string or *mongo.Database or *mongo.Collection
-	switch database.(type) {
-	case string:
-		a.databasename = database.(string)
-		a.collection = nil
-	case *mongo.Database:
-		a.databasename = database.(*mongo.Database).Name()
-		a.collection = database.(*mongo.Database).Collection(CasbinMongodbCollectionname)
-	case *mongo.Collection:
-		a.databasename = database.(*mongo.Collection).Database().Name()
-		a.collection = database.(*mongo.Collection)
+	switch param.(type) {
+	case nil:
+		panic(errors.New("nil param not allowed"))
+
+	case string: // Given string; handle as MongoDB Uri
+		cs, err := connstring.Parse(param.(string))
+
+		if err != nil {
+			panic(err)
+		}
+
+		a.client, err = mongo.NewClient(options.Client().ApplyURI(param.(string)))
+
+		if err != nil {
+			panic(err)
+		}
+
+		a.databasename = cs.Database
+		a.ownclient = true
+
+	case *mongo.Database: // Given *mongo.Database; handle as it
+		a.client = param.(*mongo.Database).Client()
+		a.databasename = param.(*mongo.Database).Name()
+		a.collection = param.(*mongo.Database).Collection(CasbinMongodbCollectionname)
+
+	case *mongo.Collection: // Given *mongo.Collection; handle as it
+		a.client = param.(*mongo.Collection).Database().Client()
+		a.databasename = param.(*mongo.Collection).Database().Name()
+		a.collection = param.(*mongo.Collection)
 	default:
-		panic(errors.New("string/*mongo.Database/*mongo.Collection instance required"))
+		panic(errors.New("string/*mongo.Database/*mongo.Collection required"))
 	}
 
 	// Open the DB, create it if not existed.
@@ -90,52 +111,16 @@ func newAdapterWithParams(mC *mongo.Client, database interface{}, autodisconnect
 	return a
 }
 
-// NewAdapter is the constructor for Adapter. If database name is not provided
-// in the Mongo URI, 'casbin' will be used as database name.
-func NewAdapter(uri string) persist.Adapter {
-	cs, err := connstring.Parse(uri)
-
-	if err != nil {
-		panic(err)
-	}
-
-	mC, err := mongo.NewClient(options.Client().ApplyURI(uri))
-
-	if err != nil {
-		panic(err)
-	}
-
-	return newAdapterWithParams(mC, cs.Database, true)
-}
-
-// NewAdapterWithClient is an alternative constructor for Adapter
-// that does the same as NewAdapter, but uses *mongo.Client instead of a Mongo URI
-func NewAdapterWithClient(mC *mongo.Client, database string) persist.Adapter {
-	if mC == nil {
-		panic(errors.New("mongo client instance are required"))
-	}
-
-	return newAdapterWithParams(mC, database, false)
-}
-
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Database instead of a Mongo URI
 func NewAdapterWithDatabase(mDatabase *mongo.Database) persist.Adapter {
-	if mDatabase == nil {
-		panic(errors.New("database instance are required"))
-	}
-
-	return newAdapterWithParams(mDatabase.Client(), mDatabase, false)
+	return NewAdapter(mDatabase)
 }
 
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Collection instead of a Mongo URI
 func NewAdapterWithCollection(mCollection *mongo.Collection) persist.Adapter {
-	if mCollection == nil {
-		panic(errors.New("collection instance are required"))
-	}
-
-	return newAdapterWithParams(mCollection.Database().Client(), mCollection, false)
+	return NewAdapter(mCollection)
 }
 
 // NewFilteredAdapter is the constructor for FilteredAdapter.

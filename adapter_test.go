@@ -16,7 +16,6 @@ package mongodbadapter
 
 import (
 	"context"
-	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -252,25 +251,28 @@ func TestNewAdapterWithUnknownURL(t *testing.T) {
 	_ = NewAdapter("fakeserver:27017")
 }
 
-func TestNewAdapterWithClient(t *testing.T) {
-	client, err := mongo.NewClient(options.Client().ApplyURI(getDbURI()))
+func TestNewAdapterWithWrongParams(t *testing.T) {
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Expected recovery from panic")
+			}
 
-	if err != nil {
-		panic(err)
-	}
+		}()
 
-	// connect
-	_ = client.Connect(context.Background())
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Error("Expected recovery from panic")
-		}
-
-		_ = client.Disconnect(context.Background())
+		_ = NewAdapter(nil)
 	}()
 
-	_ = NewAdapterWithClient(client, "casbin_test")
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Expected recovery from panic")
+			}
+
+		}()
+
+		_ = NewAdapter(1)
+	}()
 }
 
 func TestNewAdapterWithDatabase(t *testing.T) {
@@ -286,7 +288,6 @@ func TestNewAdapterWithDatabase(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Error("Expected recovery from panic")
-			fmt.Println(r)
 		}
 
 		_ = client.Disconnect(context.Background())
@@ -308,7 +309,6 @@ func TestNewAdapterWithCollection(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Error("Expected recovery from panic")
-			fmt.Println(r)
 		}
 
 		_ = client.Disconnect(context.Background())

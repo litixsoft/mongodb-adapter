@@ -3,6 +3,10 @@ MongoDB Adapter [![Build Status](https://travis-ci.org/litixsoft/mongodb-adapter
 
 MongoDB Adapter is the [Mongo DB](https://www.mongodb.com) adapter for [Casbin](https://github.com/casbin/casbin). With this library, Casbin can load policy from MongoDB or save policy to it.
 
+```
+Note: This library use the official go-mongo-driver.
+```
+
 ## Installation
 
     go get -u github.com/litixsoft/mongodb-adapter
@@ -19,8 +23,8 @@ import (
 
 func main() {
 	// Initialize a MongoDB adapter and use it in a Casbin enforcer:
-	// The adapter will use the database named "casbin".
-	// If it doesn't exist, the adapter will create it automatically.
+	// The adapter accept a mongodb uri string, a *mongo.Database or *mongo.Collection 
+    // If no database given in uri string, the adapter will use the database named "casbin".
 	a := mongodbadapter.NewAdapter("mongodb://127.0.0.1:27017") // Your MongoDB URI. 
 	
 	// Or you can use an existing DB "abc" like this:
