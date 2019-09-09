@@ -13,3 +13,6 @@ script:
 - docker-compose -f ./compose.test.yaml build
 - docker-compose -f ./compose.test.yaml run adapter
 - docker-compose -f ./compose.test.yaml down
+
+notifications:
+  slack: litixsoft:MK3nCw9B3WA7oIP075BqXrkX
