@@ -31,6 +31,7 @@ import (
 
 const CasbinMongodbDatabasename = "casbin"
 const CasbinMongodbCollectionname = "casbin_rule"
+const ContextTimeout = 30 * time.Second
 
 // CasbinRule represents a rule in Casbin.
 type CasbinRule struct {
@@ -50,7 +51,6 @@ type adapter struct {
 	databasename string
 	ownclient    bool
 	filtered     bool
-	context      context.Context
 }
 
 // finalizer is the destructor for adapter.
@@ -66,7 +66,6 @@ func finalizer(a *adapter) {
 func NewAdapter(param interface{}) persist.Adapter {
 	a := &adapter{client: nil, collection: nil, databasename: "", ownclient: false}
 	a.filtered = false
-	a.context, _ = context.WithTimeout(context.Background(), 10*time.Second)
 
 	// database interface{} as string or *mongo.Database or *mongo.Collection
 	switch param.(type) {
@@ -132,13 +131,18 @@ func NewFilteredAdapter(uri string) persist.FilteredAdapter {
 	return a
 }
 
+func (a *adapter) getContext() context.Context {
+	ctx, _ := context.WithTimeout(context.Background(), ContextTimeout)
+	return ctx
+}
+
 func (a *adapter) forceConnect() error {
-	err := a.client.Ping(a.context, readpref.Primary())
+	err := a.client.Ping(a.getContext(), readpref.Primary())
 
 	if err != nil {
 		if err == mongo.ErrClientDisconnected {
 			// try to reconnect
-			if err := a.client.Connect(a.context); err != nil {
+			if err := a.client.Connect(a.getContext()); err != nil {
 				return err
 			}
 		} else {
@@ -189,17 +193,17 @@ func (a *adapter) open() {
 		},
 	}
 
-	if _, err := a.collection.Indexes().CreateMany(a.context, indexModels); err != nil {
+	if _, err := a.collection.Indexes().CreateMany(a.getContext(), indexModels); err != nil {
 		panic(err)
 	}
 }
 
 func (a *adapter) close() {
-	_ = a.client.Disconnect(a.context)
+	_ = a.client.Disconnect(a.getContext())
 }
 
 func (a *adapter) dropTable() error {
-	err := a.collection.Drop(a.context)
+	err := a.collection.Drop(a.getContext())
 	if err != nil {
 		if err.Error() != "ns not found" {
 			return err
@@ -270,13 +274,13 @@ func (a *adapter) LoadFilteredPolicy(model model.Model, filter interface{}) erro
 		filter = bson.M{}
 	}
 
-	cursor, err := a.collection.Find(a.context, filter)
+	cursor, err := a.collection.Find(a.getContext(), filter)
 
 	if err != nil {
 		return err
 	}
 
-	for cursor.Next(a.context) {
+	for cursor.Next(a.getContext()) {
 		var line CasbinRule
 
 		if err := cursor.Decode(&line); err != nil {
@@ -346,14 +350,14 @@ func (a *adapter) SavePolicy(model model.Model) error {
 		}
 	}
 
-	_, err := a.collection.InsertMany(a.context, lines)
+	_, err := a.collection.InsertMany(a.getContext(), lines)
 	return err
 }
 
 // AddPolicy adds a policy rule to the storage.
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	_, err := a.collection.InsertOne(a.context, line)
+	_, err := a.collection.InsertOne(a.getContext(), line)
 
 	return err
 }
@@ -361,7 +365,7 @@ func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 // RemovePolicy removes a policy rule from the storage.
 func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	_, err := a.collection.DeleteOne(a.context, line)
+	_, err := a.collection.DeleteOne(a.getContext(), line)
 
 	if err != nil {
 		switch err {
@@ -410,6 +414,6 @@ func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int,
 		}
 	}
 
-	_, err := a.collection.DeleteMany(a.context, selector)
+	_, err := a.collection.DeleteMany(a.getContext(), selector)
 	return err
 }
