@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-docker pull golang:1.11
-docker pull mongo:4.0
+export MONGO_VERSION=4.2
+export GOLANG_VERSION=1.14
+docker pull golang:${GOLANG_VERSION}
+docker pull mongo:${MONGO_VERSION}
 
 docker-compose -f ./compose.test.yaml build
 docker-compose -f ./compose.test.yaml run adapter

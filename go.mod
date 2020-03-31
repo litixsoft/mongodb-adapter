@@ -1,6 +1,6 @@
 module github.com/litixsoft/mongodb-adapter
 
-go 1.12
+go 1.14
 
 require (
 	github.com/casbin/casbin/v2 v2.2.2

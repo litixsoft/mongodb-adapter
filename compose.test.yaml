@@ -1,7 +1,7 @@
 version: '3'
 services:
   adapter:
-    image: golang:1.12
+    image: "golang:${GOLANG_VERSION}"
     volumes:
       - .:/root/app
     working_dir: /root/app
@@ -11,9 +11,10 @@ services:
       - adapter-mongodb
     command: >
       sh -c "go version
+      && go env
       && pwd
       && ls -la
       && go test -cover ./..."
   adapter-mongodb:
-    image: mongo:4.0
-    command: mongod --smallfiles --logpath=/dev/null # --quiet
+    image: "mongo:${MONGO_VERSION}"
+    command: mongod --logpath=/dev/null # --quiet
