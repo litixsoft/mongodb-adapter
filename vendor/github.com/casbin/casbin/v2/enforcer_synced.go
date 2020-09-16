@@ -15,11 +15,12 @@
 package casbin
 
 import (
-	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Knetic/govaluate"
+	"github.com/casbin/casbin/v2/log"
 	"github.com/casbin/casbin/v2/persist"
 )
 
@@ -28,7 +29,7 @@ type SyncedEnforcer struct {
 	*Enforcer
 	m               sync.RWMutex
 	stopAutoLoad    chan struct{}
-	autoLoadRunning bool
+	autoLoadRunning int32
 }
 
 // NewSyncedEnforcer creates a synchronized enforcer via file or DB.
@@ -41,24 +42,30 @@ func NewSyncedEnforcer(params ...interface{}) (*SyncedEnforcer, error) {
 	}
 
 	e.stopAutoLoad = make(chan struct{}, 1)
+	e.autoLoadRunning = 0
 	return e, nil
+}
+
+// IsAutoLoadingRunning check if SyncedEnforcer is auto loading policies
+func (e *SyncedEnforcer) IsAutoLoadingRunning() bool {
+	return atomic.LoadInt32(&(e.autoLoadRunning)) != 0
 }
 
 // StartAutoLoadPolicy starts a go routine that will every specified duration call LoadPolicy
 func (e *SyncedEnforcer) StartAutoLoadPolicy(d time.Duration) {
 	// Don't start another goroutine if there is already one running
-	if e.autoLoadRunning {
+	if e.IsAutoLoadingRunning() {
 		return
 	}
-	e.autoLoadRunning = true
+	atomic.StoreInt32(&(e.autoLoadRunning), int32(1))
 	ticker := time.NewTicker(d)
 	go func() {
 		defer func() {
 			ticker.Stop()
-			e.autoLoadRunning = false
+			atomic.StoreInt32(&(e.autoLoadRunning), int32(0))
 		}()
 		n := 1
-		log.Print("Start automatically load policy")
+		log.LogPrintf("Start automatically load policy")
 		for {
 			select {
 			case <-ticker.C:
@@ -68,7 +75,7 @@ func (e *SyncedEnforcer) StartAutoLoadPolicy(d time.Duration) {
 				// log.Print("Load policy for time: ", n)
 				n++
 			case <-e.stopAutoLoad:
-				log.Print("Stop automatically load policy")
+				log.LogPrintf("Stop automatically load policy")
 				return
 			}
 		}
@@ -77,7 +84,7 @@ func (e *SyncedEnforcer) StartAutoLoadPolicy(d time.Duration) {
 
 // StopAutoLoadPolicy causes the go routine to exit.
 func (e *SyncedEnforcer) StopAutoLoadPolicy() {
-	if e.autoLoadRunning {
+	if e.IsAutoLoadingRunning() {
 		e.stopAutoLoad <- struct{}{}
 	}
 }
@@ -85,7 +92,7 @@ func (e *SyncedEnforcer) StopAutoLoadPolicy() {
 // SetWatcher sets the current watcher.
 func (e *SyncedEnforcer) SetWatcher(watcher persist.Watcher) error {
 	e.watcher = watcher
-	return watcher.SetUpdateCallback(func(string) { e.LoadPolicy() })
+	return watcher.SetUpdateCallback(func(string) { _ = e.LoadPolicy() })
 }
 
 // ClearPolicy clears all policy.
@@ -109,6 +116,13 @@ func (e *SyncedEnforcer) LoadFilteredPolicy(filter interface{}) error {
 	return e.Enforcer.LoadFilteredPolicy(filter)
 }
 
+// LoadIncrementalFilteredPolicy reloads a filtered policy from file/database.
+func (e *SyncedEnforcer) LoadIncrementalFilteredPolicy(filter interface{}) error {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.LoadIncrementalFilteredPolicy(filter)
+}
+
 // SavePolicy saves the current policy (usually after changed with Casbin API) back to file/database.
 func (e *SyncedEnforcer) SavePolicy() error {
 	e.m.RLock()
@@ -125,8 +139,8 @@ func (e *SyncedEnforcer) BuildRoleLinks() error {
 
 // Enforce decides whether a "subject" can access a "object" with the operation "action", input parameters are usually: (sub, obj, act).
 func (e *SyncedEnforcer) Enforce(rvals ...interface{}) (bool, error) {
-	e.m.Lock()
-	defer e.m.Unlock()
+	e.m.RLock()
+	defer e.m.RUnlock()
 	return e.Enforcer.Enforce(rvals...)
 }
 
@@ -367,4 +381,40 @@ func (e *SyncedEnforcer) AddFunction(name string, function govaluate.ExpressionF
 	e.m.Lock()
 	defer e.m.Unlock()
 	e.Enforcer.AddFunction(name, function)
+}
+
+// AddGroupingPolicies adds role inheritance rulea to the current policy.
+// If the rule already exists, the function returns false for the corresponding policy rule and the rule will not be added.
+// Otherwise the function returns true for the corresponding policy rule by adding the new rule.
+func (e *SyncedEnforcer) AddGroupingPolicies(rules [][]string) (bool, error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.AddGroupingPolicies(rules)
+}
+
+// AddNamedGroupingPolicies adds named role inheritance rules to the current policy.
+// If the rule already exists, the function returns false for the corresponding policy rule and the rule will not be added.
+// Otherwise the function returns true for the corresponding policy rule by adding the new rule.
+func (e *SyncedEnforcer) AddNamedGroupingPolicies(ptype string, rules [][]string) (bool, error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.AddNamedGroupingPolicies(ptype, rules)
+}
+
+// AddPolicies adds authorization rules to the current policy.
+// If the rule already exists, the function returns false for the corresponding rule and the rule will not be added.
+// Otherwise the function returns true for the corresponding rule by adding the new rule.
+func (e *SyncedEnforcer) AddPolicies(rules [][]string) (bool, error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.AddPolicies(rules)
+}
+
+// AddNamedPolicies adds authorization rules to the current named policy.
+// If the rule already exists, the function returns false for the corresponding rule and the rule will not be added.
+// Otherwise the function returns true for the corresponding by adding the new rule.
+func (e *SyncedEnforcer) AddNamedPolicies(ptype string, rules [][]string) (bool, error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.AddNamedPolicies(ptype, rules)
 }

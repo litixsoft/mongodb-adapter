@@ -16,6 +16,8 @@ package mongodbadapter
 
 import (
 	"context"
+	"fmt"
+	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -41,6 +43,14 @@ func getDbURI() string {
 	return testDbURI
 }
 
+func getDbURL() string {
+	if dbHost != "" {
+		return "mongodb://" + dbHost
+	} else {
+		return "mongodb://127.0.0.1:27017"
+	}
+}
+
 func testGetPolicy(t *testing.T, e *casbin.Enforcer, res [][]string) {
 	t.Helper()
 	myRes := e.GetPolicy()
@@ -59,7 +69,7 @@ func initPolicy(t *testing.T) {
 		panic(err)
 	}
 
-	a := NewAdapter(getDbURI())
+	a, _ := NewAdapter(getDbURI())
 	// This is a trick to save the current policy to the DB.
 	// We can't call e.SavePolicy() because the adapter in the enforcer is still the file adapter.
 	// The current policy means the policy in the Casbin enforcer (aka in memory).
@@ -89,7 +99,7 @@ func TestAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURI())
+	a, _ := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	if err != nil {
 		panic(err)
@@ -159,7 +169,7 @@ func TestAdapter(t *testing.T) {
 }
 
 func TestDeleteFilteredAdapter(t *testing.T) {
-	a := NewAdapter(getDbURI())
+	a, _ := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_tenant_service.conf", a)
 	if err != nil {
 		panic(err)
@@ -193,7 +203,7 @@ func TestFilteredAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDbURI())
+	a, _ := NewAdapter(getDbURI())
 	e, err := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	if err != nil {
 		panic(err)
@@ -243,7 +253,10 @@ func TestNewAdapterWithInvalidURL(t *testing.T) {
 		}
 	}()
 
-	_ = NewAdapter("localhost:40001?foo=1&bar=2")
+	_, err := NewAdapter("localhost:40001?foo=1&bar=2")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func TestNewAdapterWithUnknownURL(t *testing.T) {
@@ -253,7 +266,10 @@ func TestNewAdapterWithUnknownURL(t *testing.T) {
 		}
 	}()
 
-	_ = NewAdapter("fakeserver:27017")
+	_, err := NewAdapter("fakeserver:27017")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func TestNewAdapterWithWrongParams(t *testing.T) {
@@ -265,7 +281,7 @@ func TestNewAdapterWithWrongParams(t *testing.T) {
 
 		}()
 
-		_ = NewAdapter(nil)
+		_, _ = NewAdapter(nil)
 	}()
 
 	func() {
@@ -276,29 +292,15 @@ func TestNewAdapterWithWrongParams(t *testing.T) {
 
 		}()
 
-		_ = NewAdapter(1)
+		_, _ = NewAdapter(1)
 	}()
 }
 
 func TestNewAdapterWithDatabase(t *testing.T) {
-	client, err := mongo.NewClient(options.Client().ApplyURI(getDbURI()))
-
+	_, err := NewAdapter(fmt.Sprint(getDbURL() + "/abc"))
 	if err != nil {
 		panic(err)
 	}
-
-	// connect
-	_ = client.Connect(context.Background())
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Error("Expected recovery from panic")
-		}
-
-		_ = client.Disconnect(context.Background())
-	}()
-
-	_ = NewAdapterWithDatabase(client.Database("casbin_test"))
 }
 
 func TestNewAdapterWithCollection(t *testing.T) {
@@ -319,5 +321,86 @@ func TestNewAdapterWithCollection(t *testing.T) {
 		_ = client.Disconnect(context.Background())
 	}()
 
-	_ = NewAdapterWithCollection(client.Database("casbin_test").Collection("casbin_rule"))
+	_, _ = NewAdapterWithCollection(client.Database("casbin_test").Collection("casbin_rule"))
+}
+
+func TestExtended(t *testing.T) {
+	policies := [][3]string{
+		{"", "/register", "POST"},
+		{"", "/login", "POST"},
+		{"", "/ping", "GET"},
+		{"root", "/*", "*"},
+		{"user", "/user", "GET"},
+		{"god", "/god", "GET"},
+	}
+
+	t.Run("create", func(t *testing.T) {
+		// Now the DB has policy, so we can provide a normal use case.
+		// Create an adapter and an enforcer.
+		// NewEnforcer() will load the policy automatically.
+		a, _ := NewAdapter(getDbURI())
+
+		e, err := casbin.NewEnforcer("examples/custom.conf", a)
+
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+
+		// Clear all entries
+		e.ClearPolicy()
+
+		// Save empty list
+		_ = e.SavePolicy()
+
+		// Now we enable the AutoSave.
+		e.EnableAutoSave(true)
+
+		for index, policy := range policies {
+			ok, err := e.AddPolicy(policy[0], policy[1], policy[2])
+
+			assert.True(t, ok, "returns false @ index %d", index)
+			assert.NoError(t, err, "returns error @ index %d", index)
+		}
+
+		var ok, vv bool
+
+		vv = e.HasPolicy("", "/register", "POST")
+		assert.True(t, vv, "blubb")
+
+		vv = e.HasPolicy("god", "/god", "GET")
+		assert.True(t, vv, "blubb")
+
+		ok, err = e.AddPolicy("god", "/god", "GET")
+		assert.False(t, ok, "blubb")
+		assert.NoError(t, err, "Haha")
+
+		t.Run("test", func(t *testing.T) {
+			a, _ := NewAdapter(getDbURI())
+
+			e, err := casbin.NewEnforcer("examples/custom.conf", a)
+
+			if err != nil {
+				t.Error(err)
+				panic(err)
+			}
+
+			// Test add polices again
+			for index, policy := range policies {
+				ok, err := e.AddPolicy(policy[0], policy[1], policy[2])
+
+				assert.False(t, ok, "returns true @ index %d", index)
+				assert.NoError(t, err, "returns error @ index %d", index)
+			}
+
+			var vv bool
+
+			vv = e.HasPolicy("", "/register", "POST")
+			assert.True(t, vv, "blubb")
+
+			vv = e.HasPolicy("god", "/god", "GET")
+			assert.True(t, vv, "blubb")
+		})
+	})
+
 }

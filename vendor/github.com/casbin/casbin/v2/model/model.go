@@ -55,11 +55,12 @@ func (model Model) AddDef(sec string, key string, value string) bool {
 	ast := Assertion{}
 	ast.Key = key
 	ast.Value = value
+	ast.PolicyMap = make(map[string]int)
 
 	if sec == "r" || sec == "p" {
-		ast.Tokens = strings.Split(ast.Value, ", ")
+		ast.Tokens = strings.Split(ast.Value, ",")
 		for i := range ast.Tokens {
-			ast.Tokens[i] = key + "_" + ast.Tokens[i]
+			ast.Tokens[i] = key + "_" + strings.TrimSpace(ast.Tokens[i])
 		}
 	} else {
 		ast.Value = util.RemoveComments(util.EscapeAssertion(ast.Value))

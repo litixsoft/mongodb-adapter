@@ -23,6 +23,8 @@ import (
 )
 
 var _ IEnforcer = &Enforcer{}
+var _ IEnforcer = &SyncedEnforcer{}
+var _ IEnforcer = &CachedEnforcer{}
 
 // IEnforcer is the API interface of Enforcer
 type IEnforcer interface {
@@ -30,29 +32,37 @@ type IEnforcer interface {
 	InitWithFile(modelPath string, policyPath string) error
 	InitWithAdapter(modelPath string, adapter persist.Adapter) error
 	InitWithModelAndAdapter(m model.Model, adapter persist.Adapter) error
+	initialize()
 	LoadModel() error
 	GetModel() model.Model
 	SetModel(m model.Model)
 	GetAdapter() persist.Adapter
 	SetAdapter(adapter persist.Adapter)
 	SetWatcher(watcher persist.Watcher) error
+	GetRoleManager() rbac.RoleManager
 	SetRoleManager(rm rbac.RoleManager)
 	SetEffector(eft effect.Effector)
 	ClearPolicy()
 	LoadPolicy() error
 	LoadFilteredPolicy(filter interface{}) error
+	LoadIncrementalFilteredPolicy(filter interface{}) error
 	IsFiltered() bool
 	SavePolicy() error
 	EnableEnforce(enable bool)
 	EnableLog(enable bool)
+	EnableAutoNotifyWatcher(enable bool)
 	EnableAutoSave(autoSave bool)
 	EnableAutoBuildRoleLinks(autoBuildRoleLinks bool)
 	BuildRoleLinks() error
+	enforce(matcher string, explains *[]string, rvals ...interface{}) (bool, error)
 	Enforce(rvals ...interface{}) (bool, error)
+	EnforceWithMatcher(matcher string, rvals ...interface{}) (bool, error)
+	EnforceEx(rvals ...interface{}) (bool, []string, error)
+	EnforceExWithMatcher(matcher string, rvals ...interface{}) (bool, []string, error)
 
 	/* RBAC API */
-	GetRolesForUser(name string) ([]string, error)
-	GetUsersForRole(name string) ([]string, error)
+	GetRolesForUser(name string, domain ...string) ([]string, error)
+	GetUsersForRole(name string, domain ...string) ([]string, error)
 	HasRoleForUser(name string, role string) (bool, error)
 	AddRoleForUser(user string, role string) (bool, error)
 	AddPermissionForUser(user string, permission ...string) (bool, error)
@@ -68,6 +78,13 @@ type IEnforcer interface {
 	DeleteUser(user string) (bool, error)
 	DeleteRole(role string) (bool, error)
 	DeletePermission(permission ...string) (bool, error)
+
+	/* RBAC API with domains*/
+	GetUsersForRoleInDomain(name string, domain string) []string
+	GetRolesForUserInDomain(name string, domain string) []string
+	GetPermissionsForUserInDomain(user string, domain string) [][]string
+	AddRoleForUserInDomain(user string, role string, domain string) (bool, error)
+	DeleteRoleForUserInDomain(user string, role string, domain string) (bool, error)
 
 	/* Management API */
 	GetAllSubjects() []string

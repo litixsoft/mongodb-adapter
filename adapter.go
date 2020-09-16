@@ -20,8 +20,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/x/bsonx"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/casbin/casbin/v2/model"
@@ -51,6 +53,7 @@ type adapter struct {
 	databasename string
 	ownclient    bool
 	filtered     bool
+	timeout      time.Duration
 }
 
 // finalizer is the destructor for adapter.
@@ -63,26 +66,32 @@ func finalizer(a *adapter) {
 // NewAdapter is the constructor for Adapter.
 // param can be a mongodb uri string, *mongo.Database or *mongo.Collection
 // If database name is not provided in the Mongo URI, 'casbin' will be used as database name.
-func NewAdapter(param interface{}) persist.Adapter {
-	a := &adapter{client: nil, collection: nil, databasename: "", ownclient: false}
+func NewAdapter(param interface{}) (persist.Adapter, error) {
+	a := &adapter{
+		client:       nil,
+		collection:   nil,
+		databasename: "",
+		ownclient:    false,
+		timeout:      ContextTimeout,
+	}
 	a.filtered = false
 
 	// database interface{} as string or *mongo.Database or *mongo.Collection
 	switch param.(type) {
 	case nil:
-		panic(errors.New("nil param not allowed"))
+		panic(errors.New("nil not allowed"))
 
 	case string: // Given string; handle as MongoDB Uri
 		cs, err := connstring.Parse(param.(string))
 
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		a.client, err = mongo.NewClient(options.Client().ApplyURI(param.(string)))
 
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		a.databasename = cs.Database
@@ -97,38 +106,49 @@ func NewAdapter(param interface{}) persist.Adapter {
 		a.client = param.(*mongo.Collection).Database().Client()
 		a.databasename = param.(*mongo.Collection).Database().Name()
 		a.collection = param.(*mongo.Collection)
+
+	case time.Duration:
+		a.timeout = param.(time.Duration)
+
 	default:
 		panic(errors.New("string/*mongo.Database/*mongo.Collection required"))
 	}
 
 	// Open the DB, create it if not existed.
-	a.open()
+	if err := a.open(); err != nil {
+		return nil, err
+	}
 
 	// Call the destructor when the object is released.
 	runtime.SetFinalizer(a, finalizer)
 
-	return a
+	return a, nil
 }
 
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Database instead of a Mongo URI
-func NewAdapterWithDatabase(mDatabase *mongo.Database) persist.Adapter {
+func NewAdapterWithDatabase(mDatabase *mongo.Database) (persist.Adapter, error) {
 	return NewAdapter(mDatabase)
 }
 
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Collection instead of a Mongo URI
-func NewAdapterWithCollection(mCollection *mongo.Collection) persist.Adapter {
+func NewAdapterWithCollection(mCollection *mongo.Collection) (persist.Adapter, error) {
 	return NewAdapter(mCollection)
 }
 
 // NewFilteredAdapter is the constructor for FilteredAdapter.
 // Casbin will not automatically call LoadPolicy() for a filtered adapter.
-func NewFilteredAdapter(uri string) persist.FilteredAdapter {
-	a := NewAdapter(uri).(*adapter)
-	a.filtered = true
+func NewFilteredAdapter(uri string) (persist.FilteredAdapter, error) {
+	a, err := NewAdapter(uri)
 
-	return a
+	if err != nil {
+		return nil, err
+	}
+
+	a.(*adapter).filtered = true
+
+	return a.(*adapter), nil
 }
 
 func (a *adapter) getContext() context.Context {
@@ -153,7 +173,7 @@ func (a *adapter) forceConnect() error {
 	return nil
 }
 
-func (a *adapter) open() {
+func (a *adapter) open() error {
 	// Force a ping to database host
 	// if fails with ErrClientDisconnected then reconnect
 	if err := a.forceConnect(); err != nil {
@@ -168,96 +188,65 @@ func (a *adapter) open() {
 	if a.collection == nil {
 		a.collection = a.client.Database(a.databasename).Collection(CasbinMongodbCollectionname)
 	}
+	indexes := []string{"ptype", "v0", "v1", "v2", "v3", "v4", "v5"}
+	keysDoc := bsonx.Doc{}
 
-	indexModels := []mongo.IndexModel{
-		{
-			Keys: bson.D{{"ptype", 1}},
-		},
-		{
-			Keys: bson.D{{"v0", 1}},
-		},
-		{
-			Keys: bson.D{{"v1", 1}},
-		},
-		{
-			Keys: bson.D{{"v2", 1}},
-		},
-		{
-			Keys: bson.D{{"v3", 1}},
-		},
-		{
-			Keys: bson.D{{"v4", 1}},
-		},
-		{
-			Keys: bson.D{{"v5", 1}},
-		},
+	for _, k := range indexes {
+		keysDoc = keysDoc.Append(k, bsonx.Int32(1))
 	}
 
-	if _, err := a.collection.Indexes().CreateMany(a.getContext(), indexModels); err != nil {
-		panic(err)
+	if _, err := a.collection.Indexes().CreateOne(
+		context.Background(),
+		mongo.IndexModel{
+			Keys:    keysDoc,
+			Options: options.Index().SetUnique(true),
+		},
+	); err != nil {
+		return err
 	}
+
+	return nil
 }
 
 func (a *adapter) close() {
-	_ = a.client.Disconnect(a.getContext())
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
+
+	_ = a.client.Disconnect(ctx)
 }
 
 func (a *adapter) dropTable() error {
-	err := a.collection.Drop(a.getContext())
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
+
+	err := a.collection.Drop(ctx)
+
 	if err != nil {
-		if err.Error() != "ns not found" {
-			return err
-		}
+		return err
 	}
+
 	return nil
 }
 
 func loadPolicyLine(line CasbinRule, model model.Model) {
-	key := line.PType
-	sec := key[:1]
+	var p = []string{line.PType,
+		line.V0, line.V1, line.V2, line.V3, line.V4, line.V5}
+	var lineText string
+	if line.V5 != "" {
+		lineText = strings.Join(p, ", ")
+	} else if line.V4 != "" {
+		lineText = strings.Join(p[:6], ", ")
+	} else if line.V3 != "" {
+		lineText = strings.Join(p[:5], ", ")
+	} else if line.V2 != "" {
+		lineText = strings.Join(p[:4], ", ")
+	} else if line.V1 != "" {
+		lineText = strings.Join(p[:3], ", ")
+	} else if line.V0 != "" {
+		lineText = strings.Join(p[:2], ", ")
+	}
 
-	var tokens []string
-
-	// Helper func; breakable
-	func() {
-		if line.V0 != "" {
-			tokens = append(tokens, line.V0)
-		} else {
-			return
-		}
-
-		if line.V1 != "" {
-			tokens = append(tokens, line.V1)
-		} else {
-			return
-		}
-
-		if line.V2 != "" {
-			tokens = append(tokens, line.V2)
-		} else {
-			return
-		}
-
-		if line.V3 != "" {
-			tokens = append(tokens, line.V3)
-		} else {
-			return
-		}
-
-		if line.V4 != "" {
-			tokens = append(tokens, line.V4)
-		} else {
-			return
-		}
-
-		if line.V5 != "" {
-			tokens = append(tokens, line.V5)
-		} else {
-			return
-		}
-	}()
-
-	model[sec][key].Policy = append(model[sec][key].Policy, tokens)
+	persist.LoadPolicyLine(lineText, model)
 }
 
 // LoadPolicy loads policy from database.
@@ -268,29 +257,31 @@ func (a *adapter) LoadPolicy(model model.Model) error {
 // LoadFilteredPolicy loads matching policy lines from database. If not nil,
 // the filter must be a valid MongoDB selector.
 func (a *adapter) LoadFilteredPolicy(model model.Model, filter interface{}) error {
-	a.filtered = filter != nil
-
-	if !a.filtered {
-		filter = bson.M{}
+	if filter == nil {
+		a.filtered = false
+		filter = bson.D{{}}
+	} else {
+		a.filtered = true
 	}
+	line := CasbinRule{}
 
-	cursor, err := a.collection.Find(a.getContext(), filter)
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
 
+	cursor, err := a.collection.Find(ctx, filter)
 	if err != nil {
 		return err
 	}
 
-	for cursor.Next(a.getContext()) {
-		var line CasbinRule
-
-		if err := cursor.Decode(&line); err != nil {
+	for cursor.Next(ctx) {
+		err := cursor.Decode(&line)
+		if err != nil {
 			return err
 		}
-
 		loadPolicyLine(line, model)
 	}
 
-	return nil
+	return cursor.Close(ctx)
 }
 
 // IsFiltered returns true if the loaded policy has been filtered.
@@ -349,32 +340,41 @@ func (a *adapter) SavePolicy(model model.Model) error {
 			lines = append(lines, &line)
 		}
 	}
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
 
-	_, err := a.collection.InsertMany(a.getContext(), lines)
-	return err
+	if _, err := a.collection.InsertMany(ctx, lines); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // AddPolicy adds a policy rule to the storage.
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	_, err := a.collection.InsertOne(a.getContext(), line)
 
-	return err
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
+
+	if _, err := a.collection.InsertOne(ctx, line); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // RemovePolicy removes a policy rule from the storage.
 func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
-	_, err := a.collection.DeleteOne(a.getContext(), line)
 
-	if err != nil {
-		switch err {
-		case mongo.ErrNoDocuments:
-			return nil
-		default:
-			return err
-		}
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
+
+	if _, err := a.collection.DeleteOne(ctx, line); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -414,6 +414,12 @@ func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int,
 		}
 	}
 
-	_, err := a.collection.DeleteMany(a.getContext(), selector)
-	return err
+	ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+	defer cancel()
+
+	if _, err := a.collection.DeleteMany(ctx, selector); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -25,39 +25,61 @@ import (
 // Assertion represents an expression in a section of the model.
 // For example: r = sub, obj, act
 type Assertion struct {
-	Key    string
-	Value  string
-	Tokens []string
-	Policy [][]string
-	RM     rbac.RoleManager
+	Key       string
+	Value     string
+	Tokens    []string
+	Policy    [][]string
+	PolicyMap map[string]int
+	RM        rbac.RoleManager
+}
+
+func (ast *Assertion) buildIncrementalRoleLinks(rm rbac.RoleManager, op PolicyOp, rules [][]string) error {
+	ast.RM = rm
+	count := strings.Count(ast.Value, "_")
+	if count < 2 {
+		return errors.New("the number of \"_\" in role definition should be at least 2")
+	}
+
+	for _, rule := range rules {
+		if len(rule) < count {
+			return errors.New("grouping policy elements do not meet role definition")
+		}
+		if len(rule) > count {
+			rule = rule[:count]
+		}
+		switch op {
+		case PolicyAdd:
+			err := rm.AddLink(rule[0], rule[1], rule[2:]...)
+			if err != nil {
+				return err
+			}
+		case PolicyRemove:
+			err := rm.DeleteLink(rule[0], rule[1], rule[2:]...)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (ast *Assertion) buildRoleLinks(rm rbac.RoleManager) error {
 	ast.RM = rm
 	count := strings.Count(ast.Value, "_")
+	if count < 2 {
+		return errors.New("the number of \"_\" in role definition should be at least 2")
+	}
 	for _, rule := range ast.Policy {
-		if count < 2 {
-			return errors.New("the number of \"_\" in role definition should be at least 2")
-		}
 		if len(rule) < count {
 			return errors.New("grouping policy elements do not meet role definition")
 		}
-
-		if count == 2 {
-			err := ast.RM.AddLink(rule[0], rule[1])
-			if err != nil {
-				return err
-			}
-		} else if count == 3 {
-			err := ast.RM.AddLink(rule[0], rule[1], rule[2])
-			if err != nil {
-				return err
-			}
-		} else if count == 4 {
-			err := ast.RM.AddLink(rule[0], rule[1], rule[2], rule[3])
-			if err != nil {
-				return err
-			}
+		if len(rule) > count {
+			rule = rule[:count]
+		}
+		err := ast.RM.AddLink(rule[0], rule[1], rule[2:]...)
+		if err != nil {
+			return err
 		}
 	}
 

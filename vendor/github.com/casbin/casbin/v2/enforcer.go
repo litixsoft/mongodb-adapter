@@ -218,7 +218,7 @@ func (e *Enforcer) SetAdapter(adapter persist.Adapter) {
 // SetWatcher sets the current watcher.
 func (e *Enforcer) SetWatcher(watcher persist.Watcher) error {
 	e.watcher = watcher
-	return watcher.SetUpdateCallback(func(string) { e.LoadPolicy() })
+	return watcher.SetUpdateCallback(func(string) { _ = e.LoadPolicy() })
 }
 
 // GetRoleManager gets the current role manager.
@@ -258,10 +258,7 @@ func (e *Enforcer) LoadPolicy() error {
 	return nil
 }
 
-// LoadFilteredPolicy reloads a filtered policy from file/database.
-func (e *Enforcer) LoadFilteredPolicy(filter interface{}) error {
-	e.model.ClearPolicy()
-
+func (e *Enforcer) loadFilteredPolicy(filter interface{}) error {
 	var filteredAdapter persist.FilteredAdapter
 
 	// Attempt to cast the Adapter as a FilteredAdapter
@@ -285,6 +282,18 @@ func (e *Enforcer) LoadFilteredPolicy(filter interface{}) error {
 	return nil
 }
 
+// LoadFilteredPolicy reloads a filtered policy from file/database.
+func (e *Enforcer) LoadFilteredPolicy(filter interface{}) error {
+	e.model.ClearPolicy()
+
+	return e.loadFilteredPolicy(filter)
+}
+
+// LoadIncrementalFilteredPolicy append a filtered policy from file/database.
+func (e *Enforcer) LoadIncrementalFilteredPolicy(filter interface{}) error {
+	return e.loadFilteredPolicy(filter)
+}
+
 // IsFiltered returns true if the loaded policy has been filtered.
 func (e *Enforcer) IsFiltered() bool {
 	filteredAdapter, ok := e.adapter.(persist.FilteredAdapter)
@@ -303,7 +312,13 @@ func (e *Enforcer) SavePolicy() error {
 		return err
 	}
 	if e.watcher != nil {
-		return e.watcher.Update()
+		var err error
+		if watcher, ok := e.watcher.(persist.WatcherEx); ok {
+			err = watcher.UpdateForSavePolicy(e.model)
+		} else {
+			err = e.watcher.Update()
+		}
+		return err
 	}
 	return nil
 }
@@ -343,11 +358,16 @@ func (e *Enforcer) BuildRoleLinks() error {
 	return e.model.BuildRoleLinks(e.rm)
 }
 
+// BuildIncrementalRoleLinks provides incremental build the role inheritance relations.
+func (e *Enforcer) BuildIncrementalRoleLinks(op model.PolicyOp, ptype string, rules [][]string) error {
+	return e.model.BuildIncrementalRoleLinks(e.rm, op, "g", ptype, rules)
+}
+
 // enforce use a custom matcher to decides whether a "subject" can access a "object" with the operation "action", input parameters are usually: (matcher, sub, obj, act), use model matcher by default when matcher is "".
-func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
+func (e *Enforcer) enforce(matcher string, explains *[]string, rvals ...interface{}) (ok bool, err error) {
 	defer func() {
-		if err := recover(); err != nil {
-			fmt.Errorf("panic: %v", err)
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
 
@@ -355,10 +375,7 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 		return true, nil
 	}
 
-	functions := model.FunctionMap{}
-	for k, v := range e.fm {
-		functions[k] = v
-	}
+	functions := e.fm.GetFunctions()
 	if _, ok := e.model["g"]; ok {
 		for key, ast := range e.model["g"] {
 			rm := ast.RM
@@ -369,11 +386,17 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 	if matcher == "" {
 		expString = e.model["m"]["m"].Value
 	} else {
-		expString = matcher
+		expString = util.RemoveComments(util.EscapeAssertion(matcher))
 	}
-	expression, err := govaluate.NewEvaluableExpressionWithFunctions(expString, functions)
-	if err != nil {
-		return false, err
+
+	var expression *govaluate.EvaluableExpression
+	hasEval := util.HasEval(expString)
+
+	if !hasEval {
+		expression, err = govaluate.NewEvaluableExpressionWithFunctions(expString, functions)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	rTokens := make(map[string]int, len(e.model["r"]["r"].Tokens))
@@ -394,6 +417,7 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 
 	var policyEffects []effect.Effect
 	var matcherResults []float64
+
 	if policyLen := len(e.model["p"]["p"].Policy); policyLen != 0 {
 		policyEffects = make([]effect.Effect, policyLen)
 		matcherResults = make([]float64, policyLen)
@@ -415,6 +439,29 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 			}
 
 			parameters.pVals = pvals
+
+			if hasEval {
+				ruleNames := util.GetEvalValue(expString)
+				var expWithRule = expString
+				for _, ruleName := range ruleNames {
+					if j, ok := parameters.pTokens[ruleName]; ok {
+						rule := util.EscapeAssertion(pvals[j])
+						if strings.Contains(rule, ">") || strings.Contains(rule, "<") || strings.Contains(rule, "=") {
+							expWithRule = util.ReplaceEval(expWithRule, rule)
+						} else {
+							expWithRule = util.ReplaceEval(expWithRule, "false")
+						}
+					} else {
+						return false, errors.New("please make sure rule exists in policy when using eval() in matcher")
+					}
+
+					expression, err = govaluate.NewEvaluableExpressionWithFunctions(expWithRule, functions)
+					if err != nil {
+						return false, fmt.Errorf("p.sub_rule should satisfy the syntax of matcher: %s", err)
+					}
+				}
+
+			}
 
 			result, err := expression.Eval(parameters)
 			// log.LogPrint("Result: ", result)
@@ -459,6 +506,10 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 
 		}
 	} else {
+		if hasEval && len(e.model["p"]["p"].Policy) == 0 {
+			return false, errors.New("please make sure rule exists in policy when using eval() in matcher")
+		}
+
 		policyEffects = make([]effect.Effect, 1)
 		matcherResults = make([]float64, 1)
 
@@ -480,9 +531,15 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 
 	// log.LogPrint("Rule Results: ", policyEffects)
 
-	result, err := e.eft.MergeEffects(e.model["e"]["e"].Value, policyEffects, matcherResults)
+	result, explainIndex, err := e.eft.MergeEffects(e.model["e"]["e"].Value, policyEffects, matcherResults)
 	if err != nil {
 		return false, err
+	}
+
+	if explains != nil {
+		if explainIndex != -1 && len(e.model["p"]["p"].Policy) > explainIndex {
+			*explains = e.model["p"]["p"].Policy[explainIndex]
+		}
 	}
 
 	// Log request.
@@ -496,7 +553,20 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 				reqStr.WriteString(fmt.Sprintf("%v", rval))
 			}
 		}
-		reqStr.WriteString(fmt.Sprintf(" ---> %t", result))
+		reqStr.WriteString(fmt.Sprintf(" ---> %t\n", result))
+
+		if explains != nil {
+			reqStr.WriteString("Hit Policy: ")
+			for i, pval := range *explains {
+				if i != len(*explains)-1 {
+					reqStr.WriteString(fmt.Sprintf("%v, ", pval))
+				} else {
+					reqStr.WriteString(fmt.Sprintf("%v \n", pval))
+				}
+			}
+
+		}
+
 		log.LogPrint(reqStr.String())
 	}
 
@@ -505,12 +575,26 @@ func (e *Enforcer) enforce(matcher string, rvals ...interface{}) (bool, error) {
 
 // Enforce decides whether a "subject" can access a "object" with the operation "action", input parameters are usually: (sub, obj, act).
 func (e *Enforcer) Enforce(rvals ...interface{}) (bool, error) {
-	return e.enforce("", rvals...)
+	return e.enforce("", nil, rvals...)
 }
 
 // EnforceWithMatcher use a custom matcher to decides whether a "subject" can access a "object" with the operation "action", input parameters are usually: (matcher, sub, obj, act), use model matcher by default when matcher is "".
 func (e *Enforcer) EnforceWithMatcher(matcher string, rvals ...interface{}) (bool, error) {
-	return e.enforce(matcher, rvals...)
+	return e.enforce(matcher, nil, rvals...)
+}
+
+// EnforceEx explain enforcement by informing matched rules
+func (e *Enforcer) EnforceEx(rvals ...interface{}) (bool, []string, error) {
+	explain := []string{}
+	result, err := e.enforce("", &explain, rvals...)
+	return result, explain, err
+}
+
+// EnforceExWithMatcher use a custom matcher and explain enforcement by informing matched rules
+func (e *Enforcer) EnforceExWithMatcher(matcher string, rvals ...interface{}) (bool, []string, error) {
+	explain := []string{}
+	result, err := e.enforce(matcher, &explain, rvals...)
+	return result, explain, err
 }
 
 // assumes bounds have already been checked
