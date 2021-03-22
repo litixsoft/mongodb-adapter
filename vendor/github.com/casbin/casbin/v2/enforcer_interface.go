@@ -32,7 +32,6 @@ type IEnforcer interface {
 	InitWithFile(modelPath string, policyPath string) error
 	InitWithAdapter(modelPath string, adapter persist.Adapter) error
 	InitWithModelAndAdapter(m model.Model, adapter persist.Adapter) error
-	initialize()
 	LoadModel() error
 	GetModel() model.Model
 	SetModel(m model.Model)
@@ -54,27 +53,28 @@ type IEnforcer interface {
 	EnableAutoSave(autoSave bool)
 	EnableAutoBuildRoleLinks(autoBuildRoleLinks bool)
 	BuildRoleLinks() error
-	enforce(matcher string, explains *[]string, rvals ...interface{}) (bool, error)
 	Enforce(rvals ...interface{}) (bool, error)
 	EnforceWithMatcher(matcher string, rvals ...interface{}) (bool, error)
 	EnforceEx(rvals ...interface{}) (bool, []string, error)
 	EnforceExWithMatcher(matcher string, rvals ...interface{}) (bool, []string, error)
+	BatchEnforce(requests [][]interface{}) ([]bool, error)
+	BatchEnforceWithMatcher(matcher string, requests [][]interface{}) ([]bool, error)
 
 	/* RBAC API */
 	GetRolesForUser(name string, domain ...string) ([]string, error)
 	GetUsersForRole(name string, domain ...string) ([]string, error)
-	HasRoleForUser(name string, role string) (bool, error)
-	AddRoleForUser(user string, role string) (bool, error)
+	HasRoleForUser(name string, role string, domain ...string) (bool, error)
+	AddRoleForUser(user string, role string, domain ...string) (bool, error)
 	AddPermissionForUser(user string, permission ...string) (bool, error)
 	DeletePermissionForUser(user string, permission ...string) (bool, error)
 	DeletePermissionsForUser(user string) (bool, error)
-	GetPermissionsForUser(user string) [][]string
+	GetPermissionsForUser(user string, domain ...string) [][]string
 	HasPermissionForUser(user string, permission ...string) bool
 	GetImplicitRolesForUser(name string, domain ...string) ([]string, error)
 	GetImplicitPermissionsForUser(user string, domain ...string) ([][]string, error)
 	GetImplicitUsersForPermission(permission ...string) ([]string, error)
-	DeleteRoleForUser(user string, role string) (bool, error)
-	DeleteRolesForUser(user string) (bool, error)
+	DeleteRoleForUser(user string, role string, domain ...string) (bool, error)
+	DeleteRolesForUser(user string, domain ...string) (bool, error)
 	DeleteUser(user string) (bool, error)
 	DeleteRole(role string) (bool, error)
 	DeletePermission(permission ...string) (bool, error)
@@ -128,4 +128,22 @@ type IEnforcer interface {
 	RemoveNamedGroupingPolicies(ptype string, rules [][]string) (bool, error)
 	RemoveFilteredNamedGroupingPolicy(ptype string, fieldIndex int, fieldValues ...string) (bool, error)
 	AddFunction(name string, function govaluate.ExpressionFunction)
+
+	UpdatePolicy(oldPolicy []string, newPolicy []string) (bool, error)
+	UpdatePolicies(oldPolicies [][]string, newPolicies [][]string) (bool, error)
+}
+
+var _ IDistributedEnforcer = &DistributedEnforcer{}
+
+// IDistributedEnforcer defines dispatcher enforcer.
+type IDistributedEnforcer interface {
+	IEnforcer
+	SetDispatcher(dispatcher persist.Dispatcher)
+	/* Management API for DistributedEnforcer*/
+	AddPoliciesSelf(shouldPersist func() bool, sec string, ptype string, rules [][]string) (effected [][]string, err error)
+	RemovePoliciesSelf(shouldPersist func() bool, sec string, ptype string, rules [][]string) (effected [][]string, err error)
+	RemoveFilteredPolicySelf(shouldPersist func() bool, sec string, ptype string, fieldIndex int, fieldValues ...string) (effected [][]string, err error)
+	ClearPolicySelf(shouldPersist func() bool) error
+	UpdatePolicySelf(shouldPersist func() bool, sec string, ptype string, oldRule, newRule []string) (effected bool, err error)
+	UpdatePoliciesSelf(shouldPersist func() bool, sec string, ptype string, oldRules, newRules [][]string) (effected bool, err error)
 }

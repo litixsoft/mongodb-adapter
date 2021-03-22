@@ -29,34 +29,42 @@ func (e *SyncedEnforcer) GetUsersForRole(name string, domain ...string) ([]strin
 }
 
 // HasRoleForUser determines whether a user has a role.
-func (e *SyncedEnforcer) HasRoleForUser(name string, role string) (bool, error) {
+func (e *SyncedEnforcer) HasRoleForUser(name string, role string, domain ...string) (bool, error) {
 	e.m.RLock()
 	defer e.m.RUnlock()
-	return e.Enforcer.HasRoleForUser(name, role)
+	return e.Enforcer.HasRoleForUser(name, role, domain...)
 }
 
 // AddRoleForUser adds a role for a user.
 // Returns false if the user already has the role (aka not affected).
-func (e *SyncedEnforcer) AddRoleForUser(user string, role string) (bool, error) {
+func (e *SyncedEnforcer) AddRoleForUser(user string, role string, domain ...string) (bool, error) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	return e.Enforcer.AddRoleForUser(user, role)
+	return e.Enforcer.AddRoleForUser(user, role, domain...)
+}
+
+// AddRolesForUser adds roles for a user.
+// Returns false if the user already has the roles (aka not affected).
+func (e *SyncedEnforcer) AddRolesForUser(user string, roles []string, domain ...string) (bool, error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.Enforcer.AddRolesForUser(user, roles, domain...)
 }
 
 // DeleteRoleForUser deletes a role for a user.
 // Returns false if the user does not have the role (aka not affected).
-func (e *SyncedEnforcer) DeleteRoleForUser(user string, role string) (bool, error) {
+func (e *SyncedEnforcer) DeleteRoleForUser(user string, role string, domain ...string) (bool, error) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	return e.Enforcer.DeleteRoleForUser(user, role)
+	return e.Enforcer.DeleteRoleForUser(user, role, domain...)
 }
 
 // DeleteRolesForUser deletes all roles for a user.
 // Returns false if the user does not have any roles (aka not affected).
-func (e *SyncedEnforcer) DeleteRolesForUser(user string) (bool, error) {
+func (e *SyncedEnforcer) DeleteRolesForUser(user string, domain ...string) (bool, error) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	return e.Enforcer.DeleteRolesForUser(user)
+	return e.Enforcer.DeleteRolesForUser(user, domain...)
 }
 
 // DeleteUser deletes a user.
@@ -108,10 +116,10 @@ func (e *SyncedEnforcer) DeletePermissionsForUser(user string) (bool, error) {
 }
 
 // GetPermissionsForUser gets permissions for a user or role.
-func (e *SyncedEnforcer) GetPermissionsForUser(user string) [][]string {
+func (e *SyncedEnforcer) GetPermissionsForUser(user string, domain ...string) [][]string {
 	e.m.RLock()
 	defer e.m.RUnlock()
-	return e.Enforcer.GetPermissionsForUser(user)
+	return e.Enforcer.GetPermissionsForUser(user, domain...)
 }
 
 // HasPermissionForUser determines whether a user has a permission.
@@ -119,4 +127,47 @@ func (e *SyncedEnforcer) HasPermissionForUser(user string, permission ...string)
 	e.m.RLock()
 	defer e.m.RUnlock()
 	return e.Enforcer.HasPermissionForUser(user, permission...)
+}
+
+// GetImplicitRolesForUser gets implicit roles that a user has.
+// Compared to GetRolesForUser(), this function retrieves indirect roles besides direct roles.
+// For example:
+// g, alice, role:admin
+// g, role:admin, role:user
+//
+// GetRolesForUser("alice") can only get: ["role:admin"].
+// But GetImplicitRolesForUser("alice") will get: ["role:admin", "role:user"].
+func (e *SyncedEnforcer) GetImplicitRolesForUser(name string, domain ...string) ([]string, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.GetImplicitRolesForUser(name, domain...)
+}
+
+// GetImplicitPermissionsForUser gets implicit permissions for a user or role.
+// Compared to GetPermissionsForUser(), this function retrieves permissions for inherited roles.
+// For example:
+// p, admin, data1, read
+// p, alice, data2, read
+// g, alice, admin
+//
+// GetPermissionsForUser("alice") can only get: [["alice", "data2", "read"]].
+// But GetImplicitPermissionsForUser("alice") will get: [["admin", "data1", "read"], ["alice", "data2", "read"]].
+func (e *SyncedEnforcer) GetImplicitPermissionsForUser(user string, domain ...string) ([][]string, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.GetImplicitPermissionsForUser(user, domain...)
+}
+
+// GetImplicitUsersForPermission gets implicit users for a permission.
+// For example:
+// p, admin, data1, read
+// p, bob, data1, read
+// g, alice, admin
+//
+// GetImplicitUsersForPermission("data1", "read") will get: ["alice", "bob"].
+// Note: only users will be returned, roles (2nd arg in "g") will be excluded.
+func (e *SyncedEnforcer) GetImplicitUsersForPermission(permission ...string) ([]string, error) {
+	e.m.RLock()
+	defer e.m.RUnlock()
+	return e.Enforcer.GetImplicitUsersForPermission(permission...)
 }

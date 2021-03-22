@@ -2,14 +2,14 @@ Casbin
 ====
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/casbin/casbin)](https://goreportcard.com/report/github.com/casbin/casbin)
-[![Build Status](https://travis-ci.org/casbin/casbin.svg?branch=master)](https://travis-ci.org/casbin/casbin)
+[![Build Status](https://travis-ci.com/casbin/casbin.svg?branch=master)](https://travis-ci.com/casbin/casbin)
 [![Coverage Status](https://coveralls.io/repos/github/casbin/casbin/badge.svg?branch=master)](https://coveralls.io/github/casbin/casbin?branch=master)
 [![Godoc](https://godoc.org/github.com/casbin/casbin?status.svg)](https://pkg.go.dev/github.com/casbin/casbin/v2)
 [![Release](https://img.shields.io/github/release/casbin/casbin.svg)](https://github.com/casbin/casbin/releases/latest)
 [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/casbin/lobby)
 [![Sourcegraph](https://sourcegraph.com/github.com/casbin/casbin/-/badge.svg)](https://sourcegraph.com/github.com/casbin/casbin?badge)
 
-**News**: still worry about how to write the correct Casbin policy? ``Casbin online editor`` is coming to help! Try it at: http://casbin.org/editor/
+**News**: still worry about how to write the correct Casbin policy? ``Casbin online editor`` is coming to help! Try it at: https://casbin.org/editor/
 
 ![casbin Logo](casbin-logo.png)
 
@@ -136,7 +136,7 @@ What Casbin does NOT do:
 ## Installation
 
 ```
-go get github.com/casbin/casbin
+go get github.com/casbin/casbin/v2
 ```
 
 ## Documentation

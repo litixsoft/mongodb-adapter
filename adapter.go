@@ -66,7 +66,7 @@ func finalizer(a *adapter) {
 // NewAdapter is the constructor for Adapter.
 // param can be a mongodb uri string, *mongo.Database or *mongo.Collection
 // If database name is not provided in the Mongo URI, 'casbin' will be used as database name.
-func NewAdapter(param interface{}) (persist.Adapter, error) {
+func NewAdapter(param interface{}) (persist.BatchAdapter, error) {
 	a := &adapter{
 		client:       nil,
 		collection:   nil,
@@ -127,13 +127,13 @@ func NewAdapter(param interface{}) (persist.Adapter, error) {
 
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Database instead of a Mongo URI
-func NewAdapterWithDatabase(mDatabase *mongo.Database) (persist.Adapter, error) {
+func NewAdapterWithDatabase(mDatabase *mongo.Database) (persist.BatchAdapter, error) {
 	return NewAdapter(mDatabase)
 }
 
 // NewAdapterWithDatabase is an alternative constructor for Adapter
 // that does the same as NewAdapter, but uses *mongo.Collection instead of a Mongo URI
-func NewAdapterWithCollection(mCollection *mongo.Collection) (persist.Adapter, error) {
+func NewAdapterWithCollection(mCollection *mongo.Collection) (persist.BatchAdapter, error) {
 	return NewAdapter(mCollection)
 }
 
@@ -359,6 +359,45 @@ func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 
 	if _, err := a.collection.InsertOne(ctx, line); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// AddPolicies adds policy rules to the storage.
+func (a *adapter) AddPolicies(sec string, ptype string, rules [][]string) error {
+	var lines []CasbinRule
+	for _, rule := range rules {
+		line := savePolicyLine(ptype, rule)
+		lines = append(lines, line)
+	}
+
+	for _, line := range lines {
+		ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+		defer cancel()
+		if _, err := a.collection.InsertOne(ctx, line); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// RemovePolicies removes policy rules from the storage.
+func (a *adapter) RemovePolicies(sec string, ptype string, rules [][]string) error {
+	var lines []CasbinRule
+	for _, rule := range rules {
+		line := savePolicyLine(ptype, rule)
+		lines = append(lines, line)
+	}
+
+	for _, line := range lines {
+		ctx, cancel := context.WithTimeout(context.TODO(), a.timeout)
+		defer cancel()
+
+		if _, err := a.collection.DeleteOne(ctx, line); err != nil {
+			return err
+		}
 	}
 
 	return nil
